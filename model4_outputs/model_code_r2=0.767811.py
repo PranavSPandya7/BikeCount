@@ -23,13 +23,7 @@ def parse_args():
         default="/home/runner/work/BikeCount/BikeCount/model4_outputs",
         help="Directory for outputs",
     )
-    p.add_argument("--n-clusters", type=int, default=9, help="Number of teacher/feature clusters")
-    p.add_argument(
-        "--mean-blend-scale",
-        type=float,
-        default=30.0,
-        help="Blend scale for shrinking low-mean station predictions toward station mean",
-    )
+    p.add_argument("--n-clusters", type=int, default=4, help="Number of teacher/feature clusters")
     p.add_argument("--max-stations", type=int, default=0, help="Limit number of test stations (0 = all)")
     p.add_argument(
         "--cluster-mode",
@@ -225,9 +219,7 @@ def main():
         )
         est_station_mean = max(est_station_mean, 1e-6)
 
-        pred_count_model = pred_profile * est_station_mean
-        blend_alpha = float(np.clip(est_station_mean / (est_station_mean + args.mean_blend_scale), 0.2, 1.0))
-        pred_count = blend_alpha * pred_count_model + (1.0 - blend_alpha) * est_station_mean
+        pred_count = pred_profile * est_station_mean
         fold_out = test_df[["FeatureID", "date_parsed", "Count"]].copy()
         fold_out["Pred_Count"] = pred_count
         fold_out["Fold_Test_Station"] = test_station
