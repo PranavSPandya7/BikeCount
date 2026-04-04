@@ -5,13 +5,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 from sklearn.cluster import KMeans
 from sklearn.ensemble import HistGradientBoostingRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="Run Model 4 only and export metrics/plots.")
+    p = argparse.ArgumentParser(description="Run Model 4 and export metrics/plots.")
     p.add_argument(
         "--input",
         default="/home/runner/work/BikeCount/BikeCount/PreparedForModel_micro_nomicro.csv",
@@ -166,7 +167,7 @@ def main():
         if static_test.empty:
             continue
         test_feature_cluster = int(km.predict(static_test[static_cols].fillna(0.0).astype(float))[0])
-        _pred_teacher_cluster = int(cluster_map.get(test_feature_cluster, 0))
+        pred_teacher_cluster = int(cluster_map.get(test_feature_cluster, 0))
 
         X_train = encode_feature_frame(train_df, row_feature_cols)
         X_test = encode_feature_frame(test_df, row_feature_cols)
@@ -197,13 +198,15 @@ def main():
         fold_out["Pred_Count"] = pred_count
         fold_out["Fold_Test_Station"] = test_station
         fold_out["Pred_Feature_Cluster"] = test_feature_cluster
-        fold_out["Pred_Teacher_Cluster"] = _pred_teacher_cluster
+        fold_out["Pred_Teacher_Cluster"] = pred_teacher_cluster
         all_preds.append(fold_out)
 
         print(f"[{i}/{len(station_ids)}] done {test_station} with {len(test_df)} rows")
 
     if not all_preds:
-        raise RuntimeError("No predictions were generated.")
+        raise RuntimeError(
+            "No predictions were generated. Verify that the input file contains valid station data with matching FeatureIDs."
+        )
 
     pred_df = pd.concat(all_preds, axis=0, ignore_index=True)
     pred_df["Pred_Count"] = pred_df["Pred_Count"].clip(lower=0.0)
@@ -217,8 +220,6 @@ def main():
     metrics = pd.DataFrame([{"Model": "Model4", "R2": r2, "RMSE": rmse, "Rows": len(pred_df), "Stations": pred_df["FeatureID"].nunique()}])
     metrics.to_csv(out_dir / "model4_metrics.csv", index=False)
     pred_df.sort_values(["date_parsed", "FeatureID"]).to_csv(out_dir / "model4_predictions_full.csv", index=False)
-
-    import matplotlib.pyplot as plt
 
     daily = pred_df.copy()
     daily["date"] = daily["date_parsed"].dt.date
