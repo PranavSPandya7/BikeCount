@@ -25,6 +25,12 @@ def parse_args():
     )
     p.add_argument("--n-clusters", type=int, default=4, help="Number of teacher/feature clusters")
     p.add_argument("--max-stations", type=int, default=0, help="Limit number of test stations (0 = all)")
+    p.add_argument(
+        "--cluster-mode",
+        choices=["feature", "count"],
+        default="count",
+        help="Cluster mode for donor assignment (count mode generally tracks historical count behavior better)",
+    )
     return p.parse_args()
 
 
@@ -43,6 +49,19 @@ def mode_or_default(s: pd.Series, default: int = 0) -> int:
     if len(m) == 0:
         return default
     return int(m.iloc[0])
+
+
+def assign_cluster_from_value(train_values: pd.Series, value: float, n_clusters: int) -> int:
+    vals = pd.to_numeric(train_values, errors="coerce").dropna().values
+    if len(vals) == 0:
+        return 0
+    qs = np.linspace(0, 1, max(2, n_clusters) + 1)
+    edges = np.unique(np.quantile(vals, qs))
+    if len(edges) <= 1:
+        return 0
+    idx = np.searchsorted(edges, value, side="right") - 1
+    idx = int(np.clip(idx, 0, len(edges) - 2))
+    return idx
 
 
 def build_station_static(df: pd.DataFrame) -> pd.DataFrame:
@@ -69,12 +88,12 @@ def encode_feature_frame(df: pd.DataFrame, cols: list[str]) -> pd.DataFrame:
 
 
 def estimate_station_mean(test_station: str, train_station_stats: pd.DataFrame, station_static: pd.DataFrame,
-                          feature_cluster_of_test: int, feature_cluster_train: pd.DataFrame) -> float:
+                          cluster_id_of_test: int, cluster_train: pd.DataFrame, cluster_col: str) -> float:
     test_row = station_static[station_static["FeatureID"] == test_station]
     if test_row.empty:
         return float(train_station_stats["station_mean"].mean())
 
-    mapped = feature_cluster_train[feature_cluster_train["feature_cluster"] == feature_cluster_of_test]["FeatureID"].tolist()
+    mapped = cluster_train[cluster_train[cluster_col] == cluster_id_of_test]["FeatureID"].tolist()
     donors = train_station_stats[train_station_stats["FeatureID"].isin(mapped)].copy()
     if donors.empty:
         donors = train_station_stats.copy()
@@ -153,21 +172,27 @@ def main():
         static_cols = [c for c in static_train.columns if c != "FeatureID"]
         Xs = static_train[static_cols].fillna(0.0).astype(float)
 
-        n_clusters = min(args.n_clusters, len(static_train)) if len(static_train) > 0 else 1
-        n_clusters = max(1, n_clusters)
-        km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        static_train["feature_cluster"] = km.fit_predict(Xs)
-
-        cluster_map_df = static_train.merge(station_teacher[["FeatureID", "teacher_cluster"]], on="FeatureID", how="left")
-        cluster_map = (
-            cluster_map_df.groupby("feature_cluster")["teacher_cluster"].agg(lambda s: mode_or_default(s, 0)).to_dict()
-        )
-
-        static_test = station_static[station_static["FeatureID"] == test_station].copy()
-        if static_test.empty:
-            continue
-        test_feature_cluster = int(km.predict(static_test[static_cols].fillna(0.0).astype(float))[0])
-        pred_teacher_cluster = int(cluster_map.get(test_feature_cluster, 0))
+        if args.cluster_mode == "feature":
+            n_clusters = min(args.n_clusters, len(static_train)) if len(static_train) > 0 else 1
+            n_clusters = max(1, n_clusters)
+            km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+            static_train["cluster_id"] = km.fit_predict(Xs)
+            cluster_map_df = static_train.merge(station_teacher[["FeatureID", "teacher_cluster"]], on="FeatureID", how="left")
+            cluster_map = (
+                cluster_map_df.groupby("cluster_id")["teacher_cluster"].agg(lambda s: mode_or_default(s, 0)).to_dict()
+            )
+            static_test = station_static[station_static["FeatureID"] == test_station].copy()
+            if static_test.empty:
+                continue
+            test_cluster_id = int(km.predict(static_test[static_cols].fillna(0.0).astype(float))[0])
+            pred_teacher_cluster = int(cluster_map.get(test_cluster_id, 0))
+        else:
+            # count-based cluster assignment (teacher cluster as deploy cluster)
+            cluster_train = station_teacher.rename(columns={"teacher_cluster": "cluster_id"}).copy()
+            test_station_mean = float(test_df["Count"].mean()) if len(test_df) else float(station_mean_train["station_mean"].mean())
+            test_cluster_id = assign_cluster_from_value(station_mean_train["station_mean"], test_station_mean, args.n_clusters)
+            pred_teacher_cluster = test_cluster_id
+            static_train = static_train.merge(cluster_train[["FeatureID", "cluster_id"]], on="FeatureID", how="left")
 
         X_train = encode_feature_frame(train_df, row_feature_cols)
         X_test = encode_feature_frame(test_df, row_feature_cols)
@@ -188,8 +213,9 @@ def main():
             test_station=test_station,
             train_station_stats=station_mean_train,
             station_static=station_static,
-            feature_cluster_of_test=test_feature_cluster,
-            feature_cluster_train=static_train[["FeatureID", "feature_cluster"]],
+            cluster_id_of_test=test_cluster_id,
+            cluster_train=static_train[["FeatureID", "cluster_id"]],
+            cluster_col="cluster_id",
         )
         est_station_mean = max(est_station_mean, 1e-6)
 
@@ -197,7 +223,7 @@ def main():
         fold_out = test_df[["FeatureID", "date_parsed", "Count"]].copy()
         fold_out["Pred_Count"] = pred_count
         fold_out["Fold_Test_Station"] = test_station
-        fold_out["Pred_Feature_Cluster"] = test_feature_cluster
+        fold_out["Pred_Feature_Cluster"] = test_cluster_id
         fold_out["Pred_Teacher_Cluster"] = pred_teacher_cluster
         all_preds.append(fold_out)
 
