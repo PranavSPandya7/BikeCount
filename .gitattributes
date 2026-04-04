@@ -1,1 +1,2 @@
+*.csv filter=lfs diff=lfs merge=lfs -text
 PreparedForModel_micro_nomicro.csv filter=lfs diff=lfs merge=lfs -text
