@@ -270,6 +270,25 @@ def main():
     daily = pred_df.copy()
     daily["date"] = daily["date_parsed"].dt.date
     feature_ids = sorted(daily["FeatureID"].astype(str).unique().tolist())
+    per_feature = {}
+    per_feature_metrics = []
+    for fid in feature_ids:
+        fdf = pred_df[pred_df["FeatureID"].astype(str) == fid].copy()
+        if fdf.empty:
+            continue
+        y_true_f = fdf["Count"].to_numpy()
+        y_pred_f = fdf["Pred_Count"].to_numpy()
+        rmse_f = math.sqrt(mean_squared_error(y_true_f, y_pred_f))
+        if len(y_true_f) < 2 or np.allclose(y_true_f, y_true_f[0]):
+            r2_f = np.nan
+        else:
+            r2_f = r2_score(y_true_f, y_pred_f)
+        per_feature[fid] = fdf
+        per_feature_metrics.append({"FeatureID": fid, "R2": r2_f, "RMSE": rmse_f})
+
+    per_feature_metrics_df = pd.DataFrame(per_feature_metrics)
+    per_feature_metrics_df.to_csv(out_dir / "model4_metrics_by_feature.csv", index=False)
+
     n_cols = 3
     n_rows = math.ceil(len(feature_ids) / n_cols)
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
@@ -291,6 +310,54 @@ def main():
     fig.suptitle(f"Model 4 - Year 2024 Daily Totals by FeatureID (R2={r2:.4f}, RMSE={rmse:.4f})", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
     fig.savefig(out_dir / "model4_full_year_daily.png", dpi=180)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
+    axes = np.array(axes).reshape(-1)
+    for i, fid in enumerate(feature_ids):
+        ax = axes[i]
+        fdf = per_feature.get(fid)
+        if fdf is None or fdf.empty:
+            ax.axis("off")
+            continue
+        ytf = fdf["Count"].to_numpy()
+        ypf = fdf["Pred_Count"].to_numpy()
+        ax.scatter(ytf, ypf, s=5, alpha=0.25)
+        lim_f = max(float(np.max(ytf)), float(np.max(ypf)), 1.0)
+        ax.plot([0, lim_f], [0, lim_f], "r--", linewidth=1)
+        r2_f = per_feature_metrics_df.loc[per_feature_metrics_df["FeatureID"] == fid, "R2"].iloc[0]
+        r2_txt = f"{r2_f:.4f}" if pd.notna(r2_f) else "NA"
+        ax.set_title(f"FeatureID {fid} (R2={r2_txt})")
+        ax.set_xlabel("Actual")
+        ax.set_ylabel("Pred")
+    for j in range(len(feature_ids), len(axes)):
+        axes[j].axis("off")
+    fig.suptitle("Model 4 - R2 Panels by FeatureID", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.savefig(out_dir / "model4_r2_panels.png", dpi=180)
+    plt.close(fig)
+
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
+    axes = np.array(axes).reshape(-1)
+    for i, fid in enumerate(feature_ids):
+        ax = axes[i]
+        fdf = per_feature.get(fid)
+        if fdf is None or fdf.empty:
+            ax.axis("off")
+            continue
+        fday = fdf.groupby(fdf["date_parsed"].dt.date, as_index=False)[["Count", "Pred_Count"]].sum()
+        x = pd.to_datetime(fday["date_parsed"])
+        resid = fday["Count"] - fday["Pred_Count"]
+        ax.plot(x, resid, linewidth=0.9)
+        ax.axhline(0, color="r", linestyle="--", linewidth=0.9)
+        rmse_f = per_feature_metrics_df.loc[per_feature_metrics_df["FeatureID"] == fid, "RMSE"].iloc[0]
+        ax.set_title(f"FeatureID {fid} (RMSE={rmse_f:.4f})")
+        ax.tick_params(axis="x", labelrotation=45)
+    for j in range(len(feature_ids), len(axes)):
+        axes[j].axis("off")
+    fig.suptitle("Model 4 - RMSE/Residual Panels by FeatureID", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.savefig(out_dir / "model4_rmse_panels.png", dpi=180)
     plt.close(fig)
 
     monthly = pred_df.copy()
