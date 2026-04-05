@@ -10,6 +10,51 @@ output_path <- if (length(args) >= 2) args[[2]] else "/home/runner/work/BikeCoun
 n_clusters <- if (length(args) >= 3) as.integer(args[[3]]) else 12L
 if (is.na(n_clusters) || n_clusters < 1) n_clusters <- 12L
 
+mean_silhouette <- function(X, labels) {
+  n <- nrow(X)
+  if (is.null(n) || n < 3) return(NA_real_)
+  labs <- as.integer(labels)
+  k <- length(unique(labs))
+  if (k < 2) return(NA_real_)
+  D <- as.matrix(dist(X))
+  sil <- rep(NA_real_, n)
+  for (i in seq_len(n)) {
+    own <- labs[i]
+    own_idx <- which(labs == own)
+    own_idx <- own_idx[own_idx != i]
+    a_i <- if (length(own_idx) == 0) 0 else mean(D[i, own_idx])
+    b_i <- Inf
+    for (other in setdiff(unique(labs), own)) {
+      other_idx <- which(labs == other)
+      if (length(other_idx) == 0) next
+      b_i <- min(b_i, mean(D[i, other_idx]))
+    }
+    if (!is.finite(b_i)) b_i <- a_i
+    denom <- max(a_i, b_i)
+    sil[i] <- if (denom <= 0) 0 else (b_i - a_i) / denom
+  }
+  mean(sil, na.rm = TRUE)
+}
+
+choose_k_by_silhouette <- function(X, k_max) {
+  n <- nrow(X)
+  if (is.null(n) || n <= 2) return(1L)
+  k_max <- min(as.integer(k_max), n - 1L)
+  if (k_max < 2) return(1L)
+  best_k <- 2L
+  best_s <- -Inf
+  for (k in 2:k_max) {
+    set.seed(42)
+    km <- kmeans(X, centers = k, iter.max = 100, nstart = 10)
+    s <- mean_silhouette(X, km$cluster)
+    if (!is.na(s) && s > best_s) {
+      best_s <- s
+      best_k <- as.integer(k)
+    }
+  }
+  as.integer(best_k)
+}
+
 df <- read.csv(input_path, stringsAsFactors = FALSE, check.names = FALSE)
 
 required_cols <- c(
@@ -56,7 +101,7 @@ for (test_station in stations) {
   feat_mat <- scale(feat_mat)
   feat_mat[is.na(feat_mat)] <- 0
 
-  k_use <- min(n_clusters, nrow(train_station))
+  k_use <- choose_k_by_silhouette(feat_mat, n_clusters)
   if (is.na(k_use) || k_use < 1) k_use <- 1L
   set.seed(42)
   km <- kmeans(feat_mat, centers = k_use, iter.max = 100, nstart = 10)
