@@ -244,6 +244,9 @@ def main():
 
     pred_df = pd.concat(all_preds, axis=0, ignore_index=True)
     pred_df["Pred_Count"] = pred_df["Pred_Count"].clip(lower=0.0)
+    pred_df = pred_df[pred_df["date_parsed"].dt.year == 2024].copy()
+    if pred_df.empty:
+        raise RuntimeError("No predictions available for year 2024 after filtering.")
 
     y_true = pred_df["Count"].values
     y_pred = pred_df["Pred_Count"].values
@@ -271,7 +274,7 @@ def main():
     plt.figure(figsize=(14, 5))
     plt.plot(pd.to_datetime(daily_agg["date"]), daily_agg["Count"], label="Actual", linewidth=1.4)
     plt.plot(pd.to_datetime(daily_agg["date"]), daily_agg["Pred_Count"], label="Predicted", linewidth=1.2)
-    plt.title(f"Model 4 - Full Year Daily Total (R2={r2:.4f}, RMSE={rmse:.4f})")
+    plt.title(f"Model 4 - Year 2024 Daily Total (R2={r2:.4f}, RMSE={rmse:.4f})")
     plt.xlabel("Date")
     plt.ylabel("Daily total count")
     plt.legend()
@@ -301,7 +304,7 @@ def main():
     handles, labels = axes[0].get_legend_handles_labels()
     if handles:
         fig.legend(handles, labels, loc="upper center", ncol=2)
-    fig.suptitle("Model 4 - Monthly Daily Totals (12-Month Panels)", y=0.99)
+    fig.suptitle("Model 4 - Year 2024 Monthly Daily Totals (12-Month Panels)", y=0.99)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
     fig.savefig(out_dir / "model4_12month_panels.png", dpi=180)
     plt.close(fig)
