@@ -269,18 +269,29 @@ def main():
 
     daily = pred_df.copy()
     daily["date"] = daily["date_parsed"].dt.date
-    daily_agg = daily.groupby("date", as_index=False)[["Count", "Pred_Count"]].sum()
-
-    plt.figure(figsize=(14, 5))
-    plt.plot(pd.to_datetime(daily_agg["date"]), daily_agg["Count"], label="Actual", linewidth=1.4)
-    plt.plot(pd.to_datetime(daily_agg["date"]), daily_agg["Pred_Count"], label="Predicted", linewidth=1.2)
-    plt.title(f"Model 4 - Year 2024 Daily Total (R2={r2:.4f}, RMSE={rmse:.4f})")
-    plt.xlabel("Date")
-    plt.ylabel("Daily total count")
-    plt.legend()
-    plt.tight_layout()
-    plt.savefig(out_dir / "model4_full_year_daily.png", dpi=180)
-    plt.close()
+    feature_ids = sorted(daily["FeatureID"].astype(str).unique().tolist())
+    n_cols = 3
+    n_rows = math.ceil(len(feature_ids) / n_cols)
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
+    axes = np.array(axes).reshape(-1)
+    for i, fid in enumerate(feature_ids):
+        ax = axes[i]
+        fdf = daily[daily["FeatureID"].astype(str) == fid]
+        fday = fdf.groupby("date", as_index=False)[["Count", "Pred_Count"]].sum()
+        x = pd.to_datetime(fday["date"])
+        ax.plot(x, fday["Count"], label="Actual", linewidth=1.0)
+        ax.plot(x, fday["Pred_Count"], label="Predicted", linewidth=1.0)
+        ax.set_title(f"FeatureID {fid}")
+        ax.tick_params(axis="x", labelrotation=45)
+    for j in range(len(feature_ids), len(axes)):
+        axes[j].axis("off")
+    handles, labels = axes[0].get_legend_handles_labels()
+    if handles:
+        fig.legend(handles, labels, loc="upper center", ncol=2)
+    fig.suptitle(f"Model 4 - Year 2024 Daily Totals by FeatureID (R2={r2:.4f}, RMSE={rmse:.4f})", y=0.995)
+    fig.tight_layout(rect=[0, 0, 1, 0.98])
+    fig.savefig(out_dir / "model4_full_year_daily.png", dpi=180)
+    plt.close(fig)
 
     monthly = pred_df.copy()
     monthly["month"] = monthly["date_parsed"].dt.month
