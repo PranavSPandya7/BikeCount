@@ -24,6 +24,30 @@ def parse_args():
     return p.parse_args()
 
 
+MANUAL_DIRECTIONALITY_MAP = {
+    "CB1101": "inbound",
+    "CB1142": "inbound",
+    "CB1143": "outbound",
+    "CEK18": "inbound",
+    "CEK049": "inbound",
+    "CEE016": "outbound",
+    "CB1599": "inbound",
+    "CB1699": "outbound",
+    "CB2105": "outbound",
+    "CJM90": "inbound",
+    "CEV011": "outbound",
+    "CB02411": "balanced",
+    "CJE181": "inbound",
+    "CAT17": "outbound",
+    "CLW239": "inbound",
+    "COM205": "balanced",
+    "CVT387": "inbound",
+    "CEK31": "inbound",
+}
+
+DIR_TO_CODE = {"outbound": 0, "balanced": 1, "inbound": 2}
+
+
 def choose_k_by_silhouette(x: np.ndarray, max_k: int) -> int:
     n = x.shape[0]
     if n <= 2:
@@ -61,21 +85,20 @@ def main():
     df = pd.read_csv(in_path)
     required = {
         "FeatureID",
-        "Count",
-        "year_",
         "Build 125m",
         "Tree Proportion",
         "Plant Proportion",
         "Grass Proportion",
-        "Directionality_encoded",
     }
     missing = sorted(required - set(df.columns))
     if missing:
         raise RuntimeError(f"Missing required columns: {missing}")
 
     df["FeatureID"] = df["FeatureID"].astype(str)
-    df["Count"] = pd.to_numeric(df["Count"], errors="coerce")
-    df["year_"] = pd.to_numeric(df["year_"], errors="coerce").astype("Int64")
+    df["dir_label"] = (
+        df["FeatureID"].str.upper().map(MANUAL_DIRECTIONALITY_MAP).fillna("balanced")
+    )
+    df["Directionality_encoded"] = df["dir_label"].map(DIR_TO_CODE).astype(float)
 
     feature_cols = [
         "Build 125m",
@@ -94,26 +117,8 @@ def main():
         if train_df.empty or test_df.empty:
             continue
 
-        train_static = station_aggregate(train_df, feature_cols)
-        train_hist = train_df[train_df["year_"].isin([2022, 2023])].copy()
-        train_mean = (
-            train_hist.groupby("FeatureID", as_index=False)["Count"]
-            .mean()
-            .rename(columns={"Count": "mean_count_2022_2023"})
-        )
-        train_station = train_static.merge(train_mean, on="FeatureID", how="left")
-        train_station["mean_count_2022_2023"] = pd.to_numeric(
-            train_station["mean_count_2022_2023"], errors="coerce"
-        )
-        fallback_train_mean = float(train_station["mean_count_2022_2023"].mean(skipna=True))
-        if not np.isfinite(fallback_train_mean):
-            fallback_train_mean = float(train_df["Count"].mean(skipna=True))
-        if not np.isfinite(fallback_train_mean):
-            fallback_train_mean = 0.0
-        train_station["mean_count_2022_2023"] = train_station["mean_count_2022_2023"].fillna(fallback_train_mean)
-        train_station = train_station.fillna(0.0)
-
-        x_cols = feature_cols + ["mean_count_2022_2023"]
+        train_station = station_aggregate(train_df, feature_cols).fillna(0.0)
+        x_cols = feature_cols
         x_train_raw = train_station[x_cols].astype(float).to_numpy()
         mu = np.nanmean(x_train_raw, axis=0)
         sd = np.nanstd(x_train_raw, axis=0)
@@ -129,7 +134,6 @@ def main():
         test_static = station_aggregate(test_df, feature_cols)
         if test_static.empty:
             continue
-        test_static["mean_count_2022_2023"] = fallback_train_mean
         x_test = test_static[x_cols].astype(float).to_numpy()
         x_test = (np.nan_to_num(x_test, nan=0.0) - mu) / sd
         test_label = int(km.predict(x_test)[0])
@@ -162,4 +166,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
