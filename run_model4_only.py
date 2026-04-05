@@ -345,8 +345,10 @@ def main():
         if fdf is None or fdf.empty:
             ax.axis("off")
             continue
-        fday = fdf.groupby(fdf["date_parsed"].dt.date, as_index=False)[["Count", "Pred_Count"]].sum()
-        x = pd.to_datetime(fday["date_parsed"])
+        fday = fdf.copy()
+        fday["date"] = fday["date_parsed"].dt.date
+        fday = fday.groupby("date", as_index=False)[["Count", "Pred_Count"]].sum()
+        x = pd.to_datetime(fday["date"])
         resid = fday["Count"] - fday["Pred_Count"]
         ax.plot(x, resid, linewidth=0.9)
         ax.axhline(0, color="r", linestyle="--", linewidth=0.9)
