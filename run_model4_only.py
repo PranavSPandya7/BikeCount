@@ -23,11 +23,11 @@ def parse_args():
         default="/home/runner/work/BikeCount/BikeCount/model4_outputs",
         help="Directory for outputs",
     )
-    p.add_argument("--n-clusters", type=int, default=9, help="Number of teacher/feature clusters")
+    p.add_argument("--n-clusters", type=int, default=12, help="Number of teacher/feature clusters")
     p.add_argument(
         "--mean-blend-scale",
         type=float,
-        default=30.0,
+        default=0.0,
         help="Blend scale for shrinking low-mean station predictions toward station mean",
     )
     p.add_argument("--max-stations", type=int, default=0, help="Limit number of test stations (0 = all)")
