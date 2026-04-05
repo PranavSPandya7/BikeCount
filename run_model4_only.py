@@ -37,6 +37,16 @@ def parse_args():
         default="count",
         help="Cluster mode for donor assignment (count mode generally tracks historical count behavior better)",
     )
+    p.add_argument(
+        "--external-cluster-csv",
+        default="",
+        help="Optional external per-fold cluster CSV with columns: Fold_Test_Station, FeatureID, cluster_id, is_test",
+    )
+    p.add_argument(
+        "--output-suffix",
+        default="",
+        help="Optional suffix appended to output filenames (e.g. _avgcount)",
+    )
     return p.parse_args()
 
 
@@ -125,6 +135,13 @@ def main():
     input_path = Path(args.input)
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    suffix = str(args.output_suffix or "")
+
+    def out_name(filename: str) -> str:
+        if not suffix:
+            return filename
+        p = Path(filename)
+        return f"{p.stem}{suffix}{p.suffix}"
 
     df = pd.read_csv(input_path)
     if "date_parsed" in df.columns:
@@ -143,6 +160,17 @@ def main():
         station_ids = station_ids[:args.max_stations]
 
     station_static = build_station_static(df)
+    external_clusters = None
+    if args.external_cluster_csv:
+        external_clusters = pd.read_csv(args.external_cluster_csv)
+        req_cols = {"Fold_Test_Station", "FeatureID", "cluster_id", "is_test"}
+        missing = req_cols - set(external_clusters.columns)
+        if missing:
+            raise RuntimeError(f"External cluster CSV missing required columns: {sorted(missing)}")
+        external_clusters["Fold_Test_Station"] = external_clusters["Fold_Test_Station"].astype(str)
+        external_clusters["FeatureID"] = external_clusters["FeatureID"].astype(str)
+        external_clusters["cluster_id"] = pd.to_numeric(external_clusters["cluster_id"], errors="coerce").fillna(0).astype(int)
+        external_clusters["is_test"] = pd.to_numeric(external_clusters["is_test"], errors="coerce").fillna(0).astype(int)
 
     row_feature_cols = [
         "hourCET", "mth", "weekday", "weCET", "School_holiday", "weeknum", "year_",
@@ -178,7 +206,19 @@ def main():
         static_cols = [c for c in static_train.columns if c != "FeatureID"]
         Xs = static_train[static_cols].fillna(0.0).astype(float)
 
-        if args.cluster_mode == "feature":
+        if external_clusters is not None:
+            fold_clusters = external_clusters[external_clusters["Fold_Test_Station"] == str(test_station)].copy()
+            if fold_clusters.empty:
+                continue
+            test_rows = fold_clusters[fold_clusters["is_test"] == 1]
+            if test_rows.empty:
+                continue
+            test_cluster_id = int(test_rows.iloc[0]["cluster_id"])
+            pred_teacher_cluster = test_cluster_id
+            train_cluster_map = fold_clusters[fold_clusters["is_test"] == 0][["FeatureID", "cluster_id"]].copy()
+            static_train = static_train.merge(train_cluster_map, on="FeatureID", how="left")
+            static_train["cluster_id"] = pd.to_numeric(static_train["cluster_id"], errors="coerce").fillna(test_cluster_id).astype(int)
+        elif args.cluster_mode == "feature":
             n_clusters = min(args.n_clusters, len(static_train)) if len(static_train) > 0 else 1
             n_clusters = max(1, n_clusters)
             km = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
@@ -287,16 +327,16 @@ def main():
     r2_tag = f"{r2:.6f}"
 
     metrics = pd.DataFrame([{"Model": "Model4", "R2": r2, "RMSE": rmse, "Rows": len(pred_df), "Stations": pred_df["FeatureID"].nunique()}])
-    metrics.to_csv(out_dir / "model4_metrics.csv", index=False)
-    pred_df.sort_values(["date_parsed", "FeatureID"]).to_csv(out_dir / "model4_predictions_full.csv", index=False)
+    metrics.to_csv(out_dir / out_name("model4_metrics.csv"), index=False)
+    pred_df.sort_values(["date_parsed", "FeatureID"]).to_csv(out_dir / out_name("model4_predictions_full.csv"), index=False)
     cluster_df = (
         pred_df[["Fold_Test_Station", "Pred_Feature_Cluster", "Pred_Teacher_Cluster"]]
         .drop_duplicates()
         .sort_values(["Fold_Test_Station"])
     )
-    cluster_df.to_csv(out_dir / f"cluster_r2={r2_tag}.csv", index=False)
+    cluster_df.to_csv(out_dir / out_name(f"cluster_r2={r2_tag}.csv"), index=False)
     script_path = Path(__file__).resolve()
-    (out_dir / f"model_code_r2={r2_tag}.py").write_text(script_path.read_text(encoding="utf-8"), encoding="utf-8")
+    (out_dir / out_name(f"model_code_r2={r2_tag}.py")).write_text(script_path.read_text(encoding="utf-8"), encoding="utf-8")
 
     daily = pred_df.copy()
     daily["date"] = daily["date_parsed"].dt.date
@@ -318,7 +358,7 @@ def main():
         per_feature_metrics.append({"FeatureID": fid, "R2": r2_f, "RMSE": rmse_f})
 
     per_feature_metrics_df = pd.DataFrame(per_feature_metrics)
-    per_feature_metrics_df.to_csv(out_dir / "model4_metrics_by_feature.csv", index=False)
+    per_feature_metrics_df.to_csv(out_dir / out_name("model4_metrics_by_feature.csv"), index=False)
 
     n_cols = 3
     n_rows = math.ceil(len(feature_ids) / n_cols)
@@ -340,7 +380,7 @@ def main():
         fig.legend(handles, labels, loc="upper center", ncol=2)
     fig.suptitle(f"Model 4 - Year 2024 Daily Totals by FeatureID (R2={r2:.4f}, RMSE={rmse:.4f})", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
-    fig.savefig(out_dir / "model4_full_year_daily.png", dpi=180)
+    fig.savefig(out_dir / out_name("model4_full_year_daily.png"), dpi=180)
     plt.close(fig)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
@@ -365,7 +405,7 @@ def main():
         axes[j].axis("off")
     fig.suptitle("Model 4 - R2 Panels by FeatureID", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
-    fig.savefig(out_dir / "model4_r2_panels.png", dpi=180)
+    fig.savefig(out_dir / out_name("model4_r2_panels.png"), dpi=180)
     plt.close(fig)
 
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(18, max(4 * n_rows, 5)), sharex=False, sharey=False)
@@ -390,7 +430,7 @@ def main():
         axes[j].axis("off")
     fig.suptitle("Model 4 - RMSE/Residual Panels by FeatureID", y=0.995)
     fig.tight_layout(rect=[0, 0, 1, 0.98])
-    fig.savefig(out_dir / "model4_rmse_panels.png", dpi=180)
+    fig.savefig(out_dir / out_name("model4_rmse_panels.png"), dpi=180)
     plt.close(fig)
 
     monthly = pred_df.copy()
@@ -417,7 +457,7 @@ def main():
         fig.legend(handles, labels, loc="upper center", ncol=2)
     fig.suptitle("Model 4 - Year 2024 Monthly Daily Totals (12-Month Panels)", y=0.99)
     fig.tight_layout(rect=[0, 0, 1, 0.97])
-    fig.savefig(out_dir / "model4_12month_panels.png", dpi=180)
+    fig.savefig(out_dir / out_name("model4_12month_panels.png"), dpi=180)
     plt.close(fig)
 
     plt.figure(figsize=(6, 6))
@@ -428,7 +468,7 @@ def main():
     plt.ylabel("Predicted Count")
     plt.title(f"Model 4 Pred vs Actual (R2={r2:.4f}, RMSE={rmse:.4f})")
     plt.tight_layout()
-    plt.savefig(out_dir / "model4_scatter.png", dpi=180)
+    plt.savefig(out_dir / out_name("model4_scatter.png"), dpi=180)
     plt.close()
 
     diurnal = pred_df.copy()
@@ -443,7 +483,7 @@ def main():
     plt.title("Model 4 - Year 2024 Diurnal 24h Average (Actual vs Predicted)")
     plt.legend()
     plt.tight_layout()
-    plt.savefig(out_dir / "model4_diurnal_24h_avg.png", dpi=180)
+    plt.savefig(out_dir / out_name("model4_diurnal_24h_avg.png"), dpi=180)
     plt.close()
 
     print("\nModel 4 completed.")
