@@ -29,8 +29,8 @@ MANUAL_DIRECTIONALITY_MAP = {
     "CB1142": "inbound",
     "CB1143": "outbound",
     "CEK18": "inbound",
-    "CEK049": "inbound",
-    "CEE016": "outbound",
+    "CEK049": "balanced",
+    "CEE016": "balanced",
     "CB1599": "inbound",
     "CB1699": "outbound",
     "CB2105": "outbound",
@@ -39,7 +39,7 @@ MANUAL_DIRECTIONALITY_MAP = {
     "CB02411": "balanced",
     "CJE181": "inbound",
     "CAT17": "outbound",
-    "CLW239": "inbound",
+    "CLW239": "balanced",
     "COM205": "balanced",
     "CVT387": "inbound",
     "CEK31": "inbound",
@@ -95,10 +95,14 @@ def main():
         raise RuntimeError(f"Missing required columns: {missing}")
 
     df["FeatureID"] = df["FeatureID"].astype(str)
+    if "Directionality_encoded" not in df.columns:
+        df["Directionality_encoded"] = 0.0
+    df["Directionality_encoded"] = pd.to_numeric(df["Directionality_encoded"], errors="coerce").fillna(0.0)
+
     df["dir_label"] = (
         df["FeatureID"].str.upper().map(MANUAL_DIRECTIONALITY_MAP).fillna("balanced")
     )
-    df["Directionality_encoded"] = df["dir_label"].map(DIR_TO_CODE).astype(float)
+    df["ManualFlowDirection_encoded"] = df["dir_label"].map(DIR_TO_CODE).astype(float)
 
     feature_cols = [
         "Build 125m",
@@ -106,6 +110,7 @@ def main():
         "Plant Proportion",
         "Grass Proportion",
         "Directionality_encoded",
+        "ManualFlowDirection_encoded",
     ]
 
     stations = sorted(df["FeatureID"].dropna().unique().tolist())
