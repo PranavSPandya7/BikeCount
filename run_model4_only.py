@@ -2,6 +2,7 @@
 import argparse
 import math
 from pathlib import Path
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -162,7 +163,16 @@ def main():
     station_static = build_station_static(df)
     external_clusters = None
     if args.external_cluster_csv:
-        external_clusters = pd.read_csv(args.external_cluster_csv)
+        try:
+            external_clusters = pd.read_csv(args.external_cluster_csv)
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"External cluster CSV not found: {args.external_cluster_csv} (from --external-cluster-csv)"
+            ) from e
+        except Exception as e:
+            raise RuntimeError(
+                f"Failed to load external cluster CSV: {args.external_cluster_csv} (from --external-cluster-csv)"
+            ) from e
         req_cols = {"Fold_Test_Station", "FeatureID", "cluster_id", "is_test"}
         missing = req_cols - set(external_clusters.columns)
         if missing:
@@ -171,6 +181,12 @@ def main():
         external_clusters["FeatureID"] = external_clusters["FeatureID"].astype(str)
         external_clusters["cluster_id"] = pd.to_numeric(external_clusters["cluster_id"], errors="coerce").fillna(0).astype(int)
         external_clusters["is_test"] = pd.to_numeric(external_clusters["is_test"], errors="coerce").fillna(0).astype(int)
+        fold_set = set(external_clusters["Fold_Test_Station"].unique().tolist())
+        missing_folds = sorted(set(station_ids) - fold_set)
+        if missing_folds:
+            raise RuntimeError(
+                f"External cluster CSV missing Fold_Test_Station entries for: {missing_folds}"
+            )
 
     row_feature_cols = [
         "hourCET", "mth", "weekday", "weCET", "School_holiday", "weeknum", "year_",
@@ -209,9 +225,15 @@ def main():
         if external_clusters is not None:
             fold_clusters = external_clusters[external_clusters["Fold_Test_Station"] == str(test_station)].copy()
             if fold_clusters.empty:
+                warnings.warn(
+                    f"Missing external clusters for Fold_Test_Station={test_station}; skipping fold."
+                )
                 continue
             test_rows = fold_clusters[fold_clusters["is_test"] == 1]
             if test_rows.empty:
+                warnings.warn(
+                    f"External clusters for Fold_Test_Station={test_station} have no is_test=1 row; skipping fold."
+                )
                 continue
             test_cluster_id = int(test_rows.iloc[0]["cluster_id"])
             pred_teacher_cluster = test_cluster_id
