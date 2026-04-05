@@ -59,7 +59,7 @@ df <- read.csv(input_path, stringsAsFactors = FALSE, check.names = FALSE)
 
 required_cols <- c(
   "FeatureID", "Count", "year_",
-  "Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion"
+  "Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "Directionality_encoded"
 )
 missing_cols <- setdiff(required_cols, names(df))
 if (length(missing_cols) > 0) {
@@ -80,7 +80,7 @@ for (test_station in stations) {
   if (nrow(train_df) == 0 || nrow(test_df) == 0) next
 
   train_feats <- aggregate(
-    train_df[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion")],
+    train_df[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "Directionality_encoded")],
     by = list(FeatureID = train_df$FeatureID),
     FUN = function(x) mean(suppressWarnings(as.numeric(x)), na.rm = TRUE)
   )
@@ -97,7 +97,7 @@ for (test_station in stations) {
   train_station$mean_count_2022_2023[is.na(train_station$mean_count_2022_2023)] <- mean(train_station$mean_count_2022_2023, na.rm = TRUE)
   train_station[is.na(train_station)] <- 0
 
-  feat_mat <- as.matrix(train_station[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "mean_count_2022_2023"), drop = FALSE])
+  feat_mat <- as.matrix(train_station[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "Directionality_encoded", "mean_count_2022_2023"), drop = FALSE])
   feat_mat <- scale(feat_mat)
   feat_mat[is.na(feat_mat)] <- 0
 
@@ -108,7 +108,7 @@ for (test_station in stations) {
   train_station$cluster_id <- as.integer(km$cluster) - 1L
 
   test_feats <- aggregate(
-    test_df[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion")],
+    test_df[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "Directionality_encoded")],
     by = list(FeatureID = test_df$FeatureID),
     FUN = function(x) mean(suppressWarnings(as.numeric(x)), na.rm = TRUE)
   )
@@ -123,7 +123,7 @@ for (test_station in stations) {
   test_feats$mean_count_2022_2023 <- test_mean_count
   test_feats[is.na(test_feats)] <- 0
 
-  test_mat <- as.matrix(test_feats[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "mean_count_2022_2023"), drop = FALSE])
+  test_mat <- as.matrix(test_feats[, c("Build 125m", "Tree Proportion", "Plant Proportion", "Grass Proportion", "Directionality_encoded", "mean_count_2022_2023"), drop = FALSE])
   center <- attr(feat_mat, "scaled:center")
   scalev <- attr(feat_mat, "scaled:scale")
   if (is.null(center)) center <- rep(0, ncol(test_mat))
